@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Trailer Pack Installer</title>
+    <link rel="stylesheet" href="/src/styles.css" />
+  </head>
+  <body>
+    <main>
+      <h1>Trailer Pack Installer</h1>
+
+      <label for="version">Select Minecraft version:</label>
+      <select id="version">
+        <option value="1.21.1">1.21.1</option>
+        <option value="1.21.4">1.21.4</option>
+        <option value="1.21.5">1.21.5</option>
+        <option value="1.21.6">1.21.6</option>
+        <option value="1.21.7">1.21.7</option>
+        <option value="1.21.8">1.21.8</option>
+        <option value="1.21.9">1.21.9</option>
+        <option value="1.21.10">1.21.10</option>
+        <option value="1.21.11">1.21.11</option>
+      </select>
+
+      <button id="install-btn">Install Trailer Pack</button>
+
+      <div id="status"></div>
+    </main>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
