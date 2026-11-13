@@ -77,6 +77,28 @@ fn detect_minecraft_dir() -> Result<PathBuf, String> {
     if path.exists() { Ok(path) } else { Err("Minecraft folder not found.".to_string()) }
 }
 
+fn detect_tlauncher_minecraft_dir() -> Result<PathBuf, String> {
+    let appdata = std::env::var("APPDATA").map_err(|_| "APPDATA not set".to_string())?;
+    let tlauncher_dir = PathBuf::from(&appdata).join(".tlauncher");
+    let default_mc = PathBuf::from(&appdata).join(".minecraft");
+
+    let props_path = tlauncher_dir.join("tlauncher-2.0.properties");
+    if props_path.exists() {
+        if let Ok(content) = fs::read_to_string(&props_path) {
+            for line in content.lines() {
+                if line.starts_with("minecraft.gamedir=") {
+                    let path_str = line.trim_start_matches("minecraft.gamedir=").trim();
+                    let path = PathBuf::from(path_str);
+                    if path.exists() {
+                        return Ok(path);
+                    }
+                }
+            }
+        }
+    }
+    if default_mc.exists() { Ok(default_mc) } else { Err("TLauncher MC folder not found.".to_string()) }
+}
+
 async fn fetch_pinned_file(client: &Client, slug: &str, version_id: &str) -> Result<ModrinthFile, String> {
     let url = format!("https://api.modrinth.com/v2/project/{}/version/{}", slug, version_id);
     let resp = client.get(&url).header("User-Agent", "TrailerPackInstaller/1.0").send().await.map_err(|e| e.to_string())?;
@@ -140,6 +162,56 @@ fn update_resource_packs(instance_dir: &Path, ordered_pack_filenames: &[String])
     if !has_incompat { lines.push("incompatibleResourcePacks:[]".to_string()); }
     fs::write(&opts_path, lines.join("\n")).map_err(|e| e.to_string())?;
     Ok(())
+}
+
+fn create_tlauncher_profile(minecraft_dir: &Path, mc_version: &str, fabric_loader: &str, game_dir: &Path) -> Result<String, String> {
+    let tlauncher_version_name = format!("Trailer Pack {}", mc_version);
+    let fabric_version_id = format!("fabric-loader-{}-{}", fabric_loader, mc_version);
+    
+    let version_dir = minecraft_dir.join("versions").join(&tlauncher_version_name);
+    fs::create_dir_all(&version_dir).map_err(|e| e.to_string())?;
+    
+    let now = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string();
+    
+    let custom_json = serde_json::json!({
+        "id": tlauncher_version_name,
+        "inheritsFrom": fabric_version_id,
+        "type": "release",
+        "time": now,
+        "releaseTime": now,
+        "libraries": []
+    });
+
+    let json_path = version_dir.join(format!("{}.json", tlauncher_version_name));
+    fs::write(&json_path, serde_json::to_string_pretty(&custom_json).map_err(|e| e.to_string())?)
+        .map_err(|e| format!("Failed to write TLauncher version JSON: {}", e))?;
+
+    let profile_path = minecraft_dir.join("launcher_profiles.json");
+    let mut root: serde_json::Value = if profile_path.exists() {
+        let text = fs::read_to_string(&profile_path).map_err(|e| e.to_string())?;
+        serde_json::from_str(&text).unwrap_or_else(|_| serde_json::json!({"profiles": {}}))
+    } else {
+        serde_json::json!({"profiles": {}})
+    };
+
+    if root.get("profiles").is_none() { root["profiles"] = serde_json::json!({}); }
+    
+    let profile = serde_json::json!({
+        "name": "Trailer Pack",
+        "type": "custom",
+        "created": now,
+        "lastUsed": now,
+        "lastVersionId": tlauncher_version_name,
+        "javaArgs": "-Xmx4G",
+        "icon": "Furnace",
+        "gameDir": game_dir.canonicalize().unwrap_or_else(|_| game_dir.to_path_buf())
+    });
+
+    root["profiles"]["Trailer Pack"] = profile;
+    fs::write(&profile_path, serde_json::to_string_pretty(&root).map_err(|e| e.to_string())?)
+        .map_err(|e| format!("Failed to write launcher_profiles.json: {}", e))?;
+
+    Ok("TLauncher profile and version created.".to_string())
 }
 
 fn create_launcher_profile(minecraft_dir: &Path, mc_version: &str, fabric_loader: &str, game_dir: &Path) -> Result<String, String> {
@@ -271,9 +343,8 @@ async fn install_pack(app: tauri::AppHandle, mc_version: String, launcher_type: 
     let entry = manifest.versions.get(&mc_version).ok_or_else(|| format!("Version {} not in manifest", mc_version))?;
 
     let client = Client::builder().timeout(std::time::Duration::from_secs(120)).build().map_err(|e| e.to_string())?;
-    let is_crystal = launcher_type == "crystal";
-
-    let (root_mc_dir, instance_dir) = if is_crystal {
+    
+    let (root_mc_dir, instance_dir) = if launcher_type == "crystal" {
         let appdata = std::env::var("APPDATA").map_err(|_| "APPDATA not set".to_string())?;
         let instances_dir = PathBuf::from(appdata).join("Crystal-Launcher").join("instances");
         
@@ -319,6 +390,13 @@ async fn install_pack(app: tauri::AppHandle, mc_version: String, launcher_type: 
         download_and_extract_natives(&client, &crystal_instance).await?;
         
         (dot_mc.clone(), dot_mc)
+    } else if launcher_type == "tlauncher" {
+        let mc_dir = detect_tlauncher_minecraft_dir()?;
+        let inst_dir = mc_dir.join("versions").join(format!("Trailer Pack {}", mc_version));
+        
+        fs::create_dir_all(&inst_dir).map_err(|e| e.to_string())?;
+        
+        (mc_dir, inst_dir)
     } else {
         let mc_dir = match minecraft_dir { Some(p) => PathBuf::from(p), None => detect_minecraft_dir()? };
         let version_id = format!("fabric-loader-{}-{}", entry.fabric_loader, mc_version);
@@ -365,8 +443,11 @@ async fn install_pack(app: tauri::AppHandle, mc_version: String, launcher_type: 
     write_iris_config(&instance_dir, &shader_filename)?;
     update_resource_packs(&instance_dir, &ordered_pack_filenames)?;
 
-    let profile_status = if is_crystal {
+    let profile_status = if launcher_type == "crystal" {
         format!("Instance created in Crystal Launcher.")
+    } else if launcher_type == "tlauncher" {
+        create_tlauncher_profile(&root_mc_dir, &mc_version, &entry.fabric_loader, &instance_dir)
+            .unwrap_or_else(|e| format!("Profile error: {}", e))
     } else {
         create_launcher_profile(&root_mc_dir, &mc_version, &entry.fabric_loader, &instance_dir).unwrap_or_else(|e| format!("Profile error: {}", e))
     };
