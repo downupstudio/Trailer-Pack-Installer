@@ -7,6 +7,7 @@ This tool automates the setup of a modded Minecraft instance. It installs the Fa
 ## Launcher Support
 - **Official Minecraft Launcher**: Creates a custom profile pointing to an isolated `gameDir` inside `.minecraft/versions/`.
 - **Crystal Launcher**: Generates a valid launcher instance folder (`u.Trailer Pack <version>`), including the `nt_static` native libraries (downloaded directly from Mojang), `.fbcmlversion`, and the required `launcher_profiles.json`.
+- **TLauncher**: Creates a dedicated version folder (`Trailer Pack <version>`) with a custom JSON manifest inheriting from Fabric. This bypasses TLauncher's proprietary profile system to ensure the instance appears natively in the launcher dropdown.
 
 ## Architecture
 - **Frontend:** Vanilla TS/HTML/CSS
@@ -47,6 +48,6 @@ Move the generated file to `src-tauri/pack_manifest.toml` before building.
 Pushing a version tag triggers a GitHub Actions workflow that builds the MSI and attaches it to a new GitHub Release.
 
 ```bash
-git tag v1.1.0
-git push origin v1.1.0
+git tag v1.2.0
+git push origin v1.2.0
 ```
